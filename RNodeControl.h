@@ -289,6 +289,9 @@ void RNode_Check_UART(){
     MsgReady = true;
   }
   if(MsgReady){
+    if(SerialBuffer[1]==0x27){
+      return;
+    }
     printf("RX: ");
     for(int i = 0; i < SerialBufferPointer; i++){
       ShowSerial(SerialBuffer[i]);
@@ -306,4 +309,40 @@ void RNode_Check_UART(){
     }
     printf("\n");
   }
+}
+
+// SHOW RNode State
+
+// SAVE RNode State
+
+// LOAD RNode State
+int RNode_Load_Config(int argc, char **argv){
+  char filename[23] = "/sdcard/rnode/set0.cnf";
+  char Buffer[512];
+  byte slot = 0;
+  JsonDocument doc;
+  FILE *file = fopen(filename, "r");
+  char chr;
+  int Index = 0;
+  while (Index < 512){
+      chr = getc(file);
+      if( chr == EOF) break;
+      Buffer[Index] = chr;
+      Index++;
+  }
+  printf("\n");
+  fclose(file);
+  deserializeJson(doc, Buffer);
+  uint32_t frequency = doc["frequency"];
+  uint32_t bandwidth = doc["bandwidth"];
+  byte sf = doc["sf"];
+  byte cr = doc["cr"];
+
+  printf("\nConfiguration %i loaded.\n",slot);
+  printf("Hz: %i\n",frequency);
+  printf("BW: %i\n",bandwidth);
+  printf("SF: %i\n",sf);
+  printf("CR: %i\n",cr);
+  
+  return EXIT_SUCCESS;
 }

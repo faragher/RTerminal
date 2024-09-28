@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include <Crypto.h>
+#include <Ed25519.h>
+
 #ifndef FRAMING_H
 #define FRAMING_H
 
@@ -137,6 +140,7 @@ void ShowSerial(char In) {
   printf(" ");
 
 }
+
 
 uint32_t ParseCharInt(char *payload, int payloadlength) {
   uint32_t Buffer = 0;
@@ -296,14 +300,14 @@ int RNode_Leave(int argc, char **argv) {
 int RNode_Display_Intensity(int argc, char **argv) {
   byte Command[4] = {FEND, CMD_DISP_INT, 0x00, FEND};
   byte intensity = 0x00;
-    if (argc > 1) {
+  if (argc > 1) {
     auto Arg = String(argv[1]);
     intensity = Arg.toInt();
-    if(intensity<0)intensity = 0;
-    if(intensity>255)intensity = 255;
+    if (intensity < 0)intensity = 0;
+    if (intensity > 255)intensity = 255;
     //printf("Setting intensity to %i\n",intensity);
   }
-  
+
   Command[2] = intensity;
   Serial2.write(Command, 4);
   return EXIT_SUCCESS;
@@ -383,23 +387,52 @@ void CBSet(char C) {
 }
 
 
-void Process_Announce(byte Type) {
+void Process_Announce(byte header) {
   printf("Received Announce\n");
-  printf("Hops: %i\n", CBGetE());
+  byte IFAC = (header & 0b10000000) >> 7;
+  byte HeaderType = (header & 0b01000000) >> 6;
+  byte hContext = (header & 0b00100000) >> 5;
+  byte Propagation = (header & 0b00010000) >> 4;
+  byte Destination = (header & 0b00001100) >> 2;
+  byte Type = (header & 0b00000011);
+  uint16_t AppDataLength = 0;
+  byte Ticket = 0;
+  printf("IFAC:        %i\n", IFAC);
+  printf("Header Type: %i\n", HeaderType);
+  printf("Context:     %i\n", hContext);
+  printf("Propagation: %i\n", Propagation);
+  printf("Destination: %i\n", Destination);
+  printf("Type:        %i\n", Type);
+  printf("Hops:        %i\n", CBGetE());
   byte Hash[16];
-  printf("Hash: ");
+  printf("Hash:        ");
   for (int i = 0; i < 16; i++) {
     Hash[i] = CBGetE();
     printf("%02x", Hash[i]);
   }
-  printf("\nContext: 0x%02x\n", CBGetE());
-  byte PKey[64];
-  printf("Public Key: ");
-  for (int i = 0; i < 64; i++) {
+  byte HashTwo[16];
+  if ((header & 0b01000000) == 0b01000000) {
+    printf("\nHashTwo:     ");
+    for (int i = 0; i < 16; i++) {
+      HashTwo[i] = CBGetE();
+      printf("%02x", HashTwo[i]);
+    }
+  }
+
+  printf("\nContext:     0x%02x\n", CBGetE());
+  byte PKey[32];
+  printf("Public Key:  ");
+  for (int i = 0; i < 32; i++) {
     PKey[i] = CBGetE();
     printf("%02x", PKey[i]);
   }
-  printf("\nName Hash: ");
+  byte SKey[32];
+  printf("\nSigning Key: ");
+  for (int i = 0; i < 32; i++) {
+    SKey[i] = CBGetE();
+    printf("%02x", SKey[i]);
+  }
+  printf("\nName Hash:   ");
   byte NameHash[10];
   for (int i = 0; i < 10; i++) {
     NameHash[i] = CBGetE();
@@ -411,7 +444,7 @@ void Process_Announce(byte Type) {
     RandomHash[i] = CBGetE();
     printf("%02x", RandomHash[i]);
   }
-  if (Type == 0b001000001) {
+  if ((header & 0b00100001) == 0b00100001) {
     byte Ratchet[32];
     printf("\nRatchet: ");
     for (int i = 0; i < 32; i++) {
@@ -421,54 +454,178 @@ void Process_Announce(byte Type) {
   }
 
   byte ASignature[64];
-  printf("\nSignature: ");
+  printf("\nSignature:   ");
   for (int i = 0; i < 64; i++) {
     ASignature[i] = CBGetE();
     printf("%02x", ASignature[i]);
   }
-  printf("\nAppData: ");
-  byte buf = CBGetE();
+  printf("\nAppData:     ");
+  byte buf;
   byte AppData[300];
   uint16_t AppDataIndex = 0;
-  if (buf == 0x93) { // Three field MSGPack - Indicates peopagation node
+  while (buf != FEND) {
     buf = CBGetE();
-    if (buf == 0xc3)printf("Active propagation node.\n");
-    if (buf == 0xc2)printf("Inactive propagation node.\n");
-    //uint32_t T = 
-    CBGetE();
-    printf("  Time: %i\n", (uint32_t)CBGetE() << 24 | (uint32_t)CBGetE() << 16 | (uint32_t)CBGetE() << 8 | (uint32_t)CBGetE());
-    buf = CBGetE();
-    if (buf == 0xcd)printf("  Max:  %u\n", (uint16_t)CBGetE() << 8 | (uint16_t)CBGetE());    
-    if (buf == 0xcb)printf("  Max:  Float - Ignoring");
-    buf = CBGetE();
-    while (buf != FEND) {
-      printf("0x%02x ", buf);
-      buf = CBGetE();
-    }
+    printf("0x%02x ", buf);
+    AppData[AppDataIndex] = buf;
+    AppDataIndex++;
   }
-  else if (buf == 0x92) { // Two field MSGPack - Indicates modern normal announce.
-    byte len = CBGetE();
-    for(int i=0;i<len;i++){
-      printf("%c",CBGetE());
+
+  AppDataIndex = 0;
+  if (AppData[0] == 0x93) { // Three field MSGPack - Indicates peopagation node
+    if (AppData[1] == 0xc3)printf("\nActive propagation node.\n");
+    if (AppData[1] == 0xc2)printf("\nInactive propagation node.\n");
+    printf("  Time: %i\n", (uint32_t)AppData[3] << 24 | (uint32_t)AppData[4] << 16 | (uint32_t)AppData[5] << 8 | (uint32_t)AppData[6]);
+    if (AppData[7] == 0xcd) {
+      printf("  Max:  %u\n", (uint16_t)AppData[8] << 8 | (uint16_t)AppData[9]);
+      AppDataIndex = 9;
+    }
+    if (AppData[7] == 0xcb) {
+      printf("  Max:  Float - Ignoring");
+      AppDataIndex = 15;
+    }
+    buf = AppData[AppDataIndex];
+    while (buf != FEND) {
+      AppDataIndex++;
+      printf("0x%02x ", buf);
+      buf = AppData[AppDataIndex];
+    }
+    AppDataLength = AppDataIndex;
+  }
+  else if (AppData[0] == 0x92) { // Two field MSGPack - Indicates modern normal announce.
+    byte len = AppData[1];
+    byte ADName[len];
+    for (int i = 0; i < len; i++) {
+      ADName[i] = AppData[2 + len];
+      printf("%c", ADName[i]);
     }
     printf("\n");
-    buf = CBGetE();
-    if(buf != FEND){
-      printf("Ticket: %i",buf);
+    if (AppData[3 + len] != FEND) {
+      printf("Ticket: %i", AppData[4 + len]);
     }
+    AppDataIndex = 5 + len;
+    buf = AppData[AppDataIndex];
     while (buf != FEND) {
-      printf("0x%02x ", buf);
-      buf = CBGetE();
+      //printf("0x%02x ", buf);
+      AppDataIndex++;
+      buf = AppData[AppDataIndex];
     }
+    AppDataLength = AppDataIndex;
   }
   else { // Legacy Announce
+    //byte ADNameBuffer[300];
+    uint16_t ADNameLen = 0;
+    buf = AppData[ADNameLen];
     while (buf != FEND) {
-      printf("%c", buf);
-      buf = CBGetE();
+      AppData[ADNameLen] = buf;
+      //ADNameBuffer[ADNameLen] = buf;
+      //printf("%c", buf);
+      ADNameLen++;
+      buf = AppData[ADNameLen];
     }
+    byte ADName[ADNameLen];
+    AppDataLength = ADNameLen;
+    //byte SignedData[SignedDataLength];
+    printf("\nName Length: %i\n", ADNameLen);
+    for (int i = 0; i < (ADNameLen); i++) {
+      //ADName[i] = ADNameBuffer[i];
+      ADName[i] = AppData[i];
+      printf("%c", ADName[i]);
+    }
+
   }
   printf("\n");
+  uint16_t SignedDataLength = 16 + 64 + 10 + 10 + AppDataLength;
+  byte SignedData[SignedDataLength];
+  if (HeaderType == 0) {
+    memcpy(SignedData, Hash, 16);
+  }
+  else {
+    memcpy(SignedData, HashTwo, 16);
+  }
+  memcpy(SignedData + 16, PKey, 32);
+  memcpy(SignedData + 48, SKey, 32);
+  memcpy(SignedData + 80, NameHash, 10);
+  memcpy(SignedData + 90, RandomHash, 10);
 
+  memcpy(SignedData + 100, AppData, AppDataLength);
+
+  printf("\nSigned Data: ");
+  for (int i = 0; i < SignedDataLength; i++) {
+    printf("0x%02x ", SignedData[i]);
+  }
+  printf("\n");
+  printf("Signed Data Length: %i\n", SignedDataLength);
+  bool verified = Ed25519::verify(ASignature, SKey, SignedData, SignedDataLength);
+  if (verified)
+  {
+    printf("Signature OK\n");
+    //char filename[49] = "/sdcard/storage/";
+    char filename[59] = "/sdcard/storage/announces/";
+    printf(filename);
+    printf("\n");
+    for(int i = 0; i < 16; i++){
+      char High = HexEnum[(Hash[i]&0b11110000)>>4];
+      char Low = HexEnum[(Hash[i]&0b00001111)];
+      filename[26+(2*i)] = High;
+      filename[26+(2*i)+1] = Low;
+      
+    }
+    printf(filename);
+    FILE* file = fopen(filename, "w");
+    for (int i = 0; i < 32; i++) {
+      fputc(PKey[i], file);
+    }
+    for (int i = 0; i < 32; i++) {
+      fputc(SKey[i], file);
+    }
+    fputc(Ticket, file);
+    fclose(file);
+  }
+  else {
+    printf("Bad Signature.\n");
+  }
+}
+
+
+void Unknown_Packet_Decoder(byte header) {
+  //byte header = CBGetE();
+  byte IFAC = (header & 0b10000000) >> 7;
+  byte HeaderType = (header & 0b01000000) >> 6;
+  byte hContext = (header & 0b00100000) >> 5;
+  byte Propagation = (header & 0b00010000) >> 4;
+  byte Destination = (header & 0b00001100) >> 2;
+  byte Type = (header & 0b00000011);
+  printf("IFAC:        %i\n", IFAC);
+  printf("Header Type: %i\n", HeaderType);
+  printf("Context:     %i\n", hContext);
+  printf("Propagation: %i\n", Propagation);
+  printf("Destination: %i\n", Destination);
+  printf("Type:        %i\n", Type);
+  byte Hops = CBGetE();
+  printf("Hops:        %i\n", Hops);
+  byte Hash[16];
+  printf("Hash One: ");
+  for (int i = 0; i < 16; i++) {
+    Hash[i] = CBGetE();
+    printf("%02x", Hash[i]);
+  }
+  printf("\n");
+  if (HeaderType == 1) {
+    byte HashTwo[16];
+    printf("Hash Two: ");
+    for (int i = 0; i < 16; i++) {
+      Hash[i] = CBGetE();
+      printf("%02x", HashTwo[i]);
+    }
+    printf("\n");
+  }
+  byte Context = CBGetE();
+  printf("Context:     %i\n", Context);
+  char payload = CBGetE();
+  while (payload != FEND) {
+    printf("0x%02x ", payload);
+    payload = CBGetE();
+  }
 }
 
 void RNode_Process() {
@@ -479,15 +636,16 @@ void RNode_Process() {
   if (cmd == CMD_DATA) {
     printf("Incoming data: \n");
     char payload = CBGetE();
-    if (payload == 0b00000001 || payload == 0b00100001) {
+    if ((payload & 0b00000001)  == 0b00000001) {
       Process_Announce(payload);
     }
+    //else if (payload == 0b01010001 || payload == 0b01110001) {
+    //  Process_Type_Two_Announce(payload);
+    //}
     else {
-      while (payload != FEND) {
-        printf("0x%02x ", payload);
-        payload = CBGetE();
-      }
+      Unknown_Packet_Decoder(payload);
     }
+
     printf("\n");
     cmd = FEND;
     wasData = true;

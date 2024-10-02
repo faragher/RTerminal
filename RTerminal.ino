@@ -1,3 +1,19 @@
+// Copyright (C) 2024, Michael Faragher
+// Based on the RNode Firmware / Reticulum Network Stack by Mark Qvist
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #include <Arduino.h>
 
 #include "ESP32Console.h"
@@ -6,6 +22,7 @@
 #include "ESP32Console/Helpers/PWDHelpers.h"
 
 #include <Crypto.h>
+#include <RNG.h>
 
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
@@ -15,9 +32,12 @@
 #include <ArduinoJson.h>
 
 #include "RNodeControl.h"
+#include "RNodeCommands.h"
+#include "RNodeHandler.h"
 #include "Commands.h"
 //#include "CryptoTest.h"
-
+#include "compact25519.h"
+#include <bootloader_random.h>
 
 using namespace ESP32Console;
 
@@ -116,6 +136,87 @@ int InitDirs(int argc, char **argv) {
   return EXIT_SUCCESS;
 }
 
+int MakeIdentity(int argc, char **argv) {
+    bootloader_random_enable();
+  printf("Making new identity\n");
+  
+  uint8_t seed[X25519_KEY_SIZE];
+  esp_fill_random(seed, X25519_KEY_SIZE);
+
+
+  uint8_t Prv[X25519_KEY_SIZE];
+  uint8_t Pub[X25519_KEY_SIZE];
+  
+  compact_x25519_keygen(Prv, Pub, seed);
+
+  esp_fill_random(seed, X25519_KEY_SIZE);
+  RNG.stir(seed,X25519_KEY_SIZE,X25519_KEY_SIZE*5);
+  esp_fill_random(seed, X25519_KEY_SIZE);
+  RNG.stir(seed,X25519_KEY_SIZE,X25519_KEY_SIZE*5);
+
+  byte Prv_Sign[32];
+  byte Pub_Sign[32];
+
+  Ed25519::generatePrivateKey(Prv_Sign);
+  Ed25519::derivePublicKey(Pub_Sign,Prv_Sign);
+
+  bootloader_random_disable();
+
+  FILE* file = fopen("/spiffs/identity", "w");
+  for (int i = 0; i < 32; i++) {
+    fputc(Prv[i], file);
+  }
+  for (int i = 0; i < 32; i++) {
+    fputc(Prv_Sign[i], file);
+  }
+  fclose(file);
+
+  file = fopen("/spiffs/enc.pub", "w");
+  for (int i = 0; i < 32; i++) {
+    fputc(Pub[i], file);
+  }
+  fclose(file);
+
+  file = fopen("/spiffs/sign.pub", "w");
+  for (int i = 0; i < 32; i++) {
+    fputc(Pub_Sign[i], file);
+  }
+  fclose(file);
+  printf("Identity written.\n");
+  return EXIT_SUCCESS;
+}
+
+void CryptoProto() {
+
+  bootloader_random_enable();
+  printf("Testing X25519\n");
+  
+  uint8_t seed1[X25519_KEY_SIZE];
+  uint8_t seed2[X25519_KEY_SIZE];
+  esp_fill_random(seed1, X25519_KEY_SIZE);
+  esp_fill_random(seed2, X25519_KEY_SIZE);
+
+  uint8_t sec1[X25519_KEY_SIZE];
+  uint8_t pub1[X25519_KEY_SIZE];
+  uint8_t sec2[X25519_KEY_SIZE];
+  uint8_t pub2[X25519_KEY_SIZE];
+  
+  compact_x25519_keygen(sec1, pub1, seed1);
+  compact_x25519_keygen(sec2, pub2, seed2);
+  
+  uint8_t shared1[X25519_SHARED_SIZE];
+  uint8_t shared2[X25519_SHARED_SIZE];
+  compact_x25519_shared(shared1, sec1, pub2);
+  compact_x25519_shared(shared2, sec2, pub1);
+  uint8_t derived[64];
+  compact_x25519_derive_encryption_key(derived, sizeof(derived), shared1, pub1, pub2);
+  if (memcmp(shared1, shared2, X25519_SHARED_SIZE) == 0) {
+    printf("x25519 check complete. Success\n");
+  }
+
+  bootloader_random_disable();
+}
+
 void InitSD() {
   printf("\nInitializing SD file system\n");
   sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -155,7 +256,7 @@ void InitSD() {
     printf("SD mount failed with code #%d, \"%s\"\n", e, esp_err_to_name(e));
   }
 }
-
+ 
 
 void TestFile() {
   char filename[PATH_MAX];
@@ -199,6 +300,7 @@ void setup()
   console.registerCommand(ConsoleCommand("rnairtime", &RNode_Show_Airtime, "Shows RNode airtime/channel load (short/long)"));
   console.registerCommand(ConsoleCommand("rnphy", &RNode_Show_Physical_Parameters, "Shows RNode physical parameters"));
   console.registerCommand(ConsoleCommand("rndi", &RNode_Display_Intensity, "Sets display intensity [0-255]"));
+  console.registerCommand(ConsoleCommand("makeid", &MakeIdentity, "Make a new Identity. Use \"override\" to overwrite an old Identity"));
 
 
 
@@ -218,15 +320,23 @@ void setup()
 
   //Register the VFS specific commands
   console.registerVFSCommands();
-  TestFile();    
+  TestFile();
   FILE *configfile = fopen("/sdcard/rterm.cnf", "r");
-    if (!configfile)
-    {
-        printf("***   Configuration file corrupt or missing!   ***\nDirectories and configuration files MUST be written prior to operation.\nRun 'initdirs' to automatically create these requirements.\n");
-    }
+  if (!configfile)
+  {
+    printf("***   Configuration file corrupt or missing!   ***\nDirectories and configuration files MUST be written prior to operation.\nRun 'initdirs' to automatically create these requirements.\n");
+  }
   fclose(configfile);
 
-//  testFixedVectors();
+    FILE *identityfile = fopen("/spiffs/identity", "r");
+  if (!identityfile)
+  {
+    printf("***   Identity file corrupt or missing!   ***\nRun 'makeid' to automatically create one.\n");
+  }
+  fclose(identityfile);
+
+  //  testFixedVectors();
+  CryptoProto();
   printf("System ready.\nRTerm /sdcard/> \n");
 
 }

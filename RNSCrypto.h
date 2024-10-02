@@ -14,29 +14,30 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include <Arduino.h>
-#include "ESP32Console/Helpers/PWDHelpers.h"
+#ifndef RNSCRYPTO
+#define RNSCRYPTO
 
-#include "ESP32Console/ConsoleCommand.h"
-#include "esp_vfs.h"
+#include <SHA256.h>
 
-#include "compact25519.h"
-
-
-int mkdirCommand(int argc, char **argv)
-{
-    if (argc != 2)
-    {
-        fprintf(stderr, "You have to pass exactly one file. Syntax mkdir [FIILE]\n");
-        return EXIT_SUCCESS;
-    }
-
-    char filename[PATH_MAX];
-    ESP32Console::console_realpath(argv[1], filename);
-
-    if(mkdir(filename, 0775)) {
-        fprintf(stderr, "Error creating %s: %s\n", filename, strerror(errno));
-    }
-
-    return EXIT_SUCCESS;
+void GetNameHash(byte Buffer[10], void* FullName, int Len) {
+  SHA256 S;
+  //S.reset();
+  S.update(FullName, Len);
+  S.finalize(Buffer, 10);
 }
+
+void GetIDfromPubKeys(byte Buffer[16], byte PubKey[32], byte PubSignKey[32]) {
+  SHA256 S;
+  S.update(PubKey, 32);
+  S.update(PubSignKey, 32);
+  S.finalize(Buffer, 16);
+}
+
+void GetDestinationFromIDandNameHash(byte Buffer[16], byte Identity[16], byte NameHash[10]) {
+  SHA256 S;
+  S.update(NameHash, 10);
+  S.update(Identity, 16);
+  S.finalize(Buffer, 16);
+}
+
+#endif

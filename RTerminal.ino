@@ -133,6 +133,8 @@ int InitDirs(int argc, char **argv) {
   printf("mkdir returned %d\n", mk_ret);
   mk_ret = mkdir("/sdcard/storage/messages", 0775);
   printf("mkdir returned %d\n", mk_ret);
+  mk_ret = mkdir("/sdcard/storage/names", 0775);
+  printf("mkdir returned %d\n", mk_ret);
   return EXIT_SUCCESS;
 }
 
@@ -301,6 +303,8 @@ void setup()
   console.registerCommand(ConsoleCommand("rnphy", &RNode_Show_Physical_Parameters, "Shows RNode physical parameters"));
   console.registerCommand(ConsoleCommand("rndi", &RNode_Display_Intensity, "Sets display intensity [0-255]"));
   console.registerCommand(ConsoleCommand("makeid", &MakeIdentity, "Make a new Identity. Use \"override\" to overwrite an old Identity"));
+  console.registerCommand(ConsoleCommand("rnmanannounce", &ManualLXMFAnnounce, "Manually announce."));
+  
 
 
 
@@ -332,10 +336,15 @@ void setup()
   if (!identityfile)
   {
     printf("***   Identity file corrupt or missing!   ***\nRun 'makeid' to automatically create one.\n");
+    fclose(identityfile);
   }
-  fclose(identityfile);
+  else
+  {
+    fclose(identityfile);
+    LoadIdentityFromFile();
+  }
+  
 
-  //  testFixedVectors();
   CryptoProto();
   printf("System ready.\nRTerm /sdcard/> \n");
 

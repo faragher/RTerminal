@@ -50,6 +50,9 @@ byte BatteryLevel = 0x00;
 
 byte edPrivateKey[32];
 byte edPublicKey[32];
+byte xPrivateKey[32];
+byte xPublicKey[32];
+byte Identity[16];
 // byte edSignature[64]; // I think this doesn't need to be global
 
 // General Enums

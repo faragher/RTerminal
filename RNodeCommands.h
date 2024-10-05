@@ -40,7 +40,7 @@ int RNode_Frequency(int argc, char **argv) {
   //    printf("0x%02x ", Command[i]);
   //  }
 
-  Serial2.write(Command, 7);
+
   return EXIT_SUCCESS;
 }
 

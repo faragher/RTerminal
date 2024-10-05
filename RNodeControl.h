@@ -50,6 +50,7 @@ uint32_t ParseCharInt(char *payload, int payloadlength) {
   return Buffer;
 }
 
+
 byte IntToByte(uint32_t I, int pos) {
   return (byte)(I >> (8 * pos));
 }
@@ -292,7 +293,7 @@ void Process_Announce(byte header) {
     printf("Signature OK\n");
     SHA256 IDHash;
     byte Digest[16];
-    GetIDfromPubKeys(Digest,PKey,SKey);
+    GetIDfromPubKeys(Digest, PKey, SKey);
 
     printf("\nDerived Identity: ");
     for (int i = 0; i < 16; i++) {
@@ -322,9 +323,9 @@ void Process_Announce(byte header) {
     byte Aspects[14] = "lxmf.delivery";
     byte AspectHash[16];
     byte FullDestination[26];
-    GetNameHash(AspectHash,Aspects,13);
+    GetNameHash(AspectHash, Aspects, 13);
     byte DestinationHash[16];
-    GetDestinationFromIDandNameHash(DestinationHash,Digest,AspectHash);
+    GetDestinationFromIDandNameHash(DestinationHash, Digest, AspectHash);
     printf("\nDerived Hash:\n");
     for (int i = 0; i < 16; i++) {
       printf("%02x", DestinationHash[i]);
@@ -335,6 +336,75 @@ void Process_Announce(byte header) {
   }
 
 
+}
+
+void SendRNode(byte* B, uint16_t Len) {
+  Serial2.write(FEND);
+  Serial2.write(CMD_DATA);
+  for (int i = 0; i < Len; i++) {
+    if (B[i] == FESC) {
+      Serial2.write(FESC);
+      Serial2.write(TFESC);
+    }
+    else if ( B[i] == FEND) {
+      Serial2.write(FESC);
+      Serial2.write(TFEND);
+    }
+
+    else {
+      Serial2.write(B[i]);
+    }
+  }
+  Serial2.write(FEND);
+  //Serial2.write(Command, Len);
+}
+
+void SendAnnounce(byte* NameHash, byte* AppData, uint16_t Len) {
+  //uint16_t Len;
+  byte Buffer[500];
+  Buffer[0] = 1;
+  Buffer[1] = 0;
+  byte DestinationHash[16];
+  GetDestinationFromIDandNameHash(DestinationHash, Identity, NameHash);
+  memcpy(Buffer+2,DestinationHash,16);
+  Buffer[18] = 0;
+  memcpy(Buffer+19,xPublicKey,32);
+  memcpy(Buffer+51,edPublicKey,32);
+  memcpy(Buffer+83,NameHash,10);
+  byte RandomBuffer[10];
+  GetRandomHash(RandomBuffer);
+  memcpy(Buffer+93,RandomBuffer,10);
+  byte SignedData[100+Len]; 
+  //memcpy(SignedData, Buffer+19, 103-19); // The Easy Way That Doesn't Work
+  memcpy(SignedData,DestinationHash,16);
+  memcpy(SignedData+16,xPublicKey,32);
+  memcpy(SignedData+48,edPublicKey,32);
+  memcpy(SignedData+80,NameHash,10);
+  memcpy(SignedData+90,RandomBuffer,10);
+  if(Len>0){
+    memcpy(SignedData+100, AppData, Len);
+  }
+  byte Signature[64];
+  SignBytes(Signature,SignedData,100+Len);
+  memcpy(Buffer+103, Signature, 64);
+  memcpy(Buffer+167, AppData, Len);
+  SendRNode(Buffer, 167+Len);
+
+  printf("\nAnnounce Debug:\n");
+  for (int i = 0; i < 167+Len; i++){
+    printf("%02x",Buffer[i]);
+  }
+  printf("\n");
+  
+}
+
+int ManualLXMFAnnounce(int argc, char **argv){
+  byte NameHash[10];
+  byte Name[14] = "lxmf.delivery";
+  GetNameHash(NameHash, Name,13);
+  byte AppData[11] = "Fishmonger";
+  SendAnnounce(NameHash, AppData, 10);
+  return EXIT_SUCCESS;
 }
 
 

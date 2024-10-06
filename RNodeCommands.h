@@ -19,6 +19,7 @@
 
 #include "RNSFraming.h"
 #include "RNSRegisters.h"
+#include "RNSDestination.h"
 
 // CMD_DATA        0x00
 // CMD_FREQUENCY   0x01

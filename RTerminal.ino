@@ -346,6 +346,7 @@ void setup()
   
 
   CryptoProto();
+  InitTestDestination();
   printf("System ready.\nRTerm /sdcard/> \n");
 
 }

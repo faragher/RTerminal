@@ -27,15 +27,19 @@ void RNode_Process() {
   //printf("Command: 0x%02x", cmd);
   if (cmd == CMD_DATA) {
     printf("Incoming data: \n");
-    char payload = CBGetE();
-    if ((payload & 0b00000001)  == 0b00000001) {
-      Process_Announce(payload);
+    char header = CBGetE();
+    if (header == 0) {
+      TestPacketHandler(header);
+      //printf("Returned from Handler\n");
     }
-    //else if (payload == 0b01010001 || payload == 0b01110001) {
-    //  Process_Type_Two_Announce(payload);
+    else if ((header & 0b00000001)  == 0b00000001) {
+      Process_Announce(header);
+    }
+    //else if (header == 0b01010001 || header == 0b01110001) {
+    //  Process_Type_Two_Announce(header);
     //}
     else {
-      Unknown_Packet_Decoder(payload);
+      Unknown_Packet_Decoder(header);
     }
 
     printf("\n");

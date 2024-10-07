@@ -1,6 +1,10 @@
 # RTerminal
 Terminal mode RNode controller with extra steps.
 
+## Requirements
+
+This project requires the Arduino Crypto libriaries *as well as* the Cryptolegacy library from `https://github.com/rweather/arduinolibs`. This cannot be installed through the Arduino library manager, and the CBC library available conflicts with the stock library. The src directory from Cryptolegacy must be added to the Crypto directory manually, regardless of how it's included in the project.
+
 ## This is highly experimental software
 
 It isn't user friendly, half the features do half of what they're intended to do, and it's not terribly useful. However, as a proof of concept, it's solid. The major hurdles are addressed, and while there is a lot of work to be done, it seems entirely possible.

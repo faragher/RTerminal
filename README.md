@@ -1,3 +1,6 @@
+
+# NOTICE: This project has been abandoned. No support will be given
+
 # RTerminal
 Terminal mode RNode controller with extra steps.
 
